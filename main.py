@@ -1,14 +1,11 @@
 from time import sleep
-# from datetime import datetime, timedelta
 import matplotlib
 matplotlib.use('WXAgg')
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_wxagg import FigureCanvasWxAgg
 from matplotlib.figure import Figure
 from threading import Thread
-# from multiprocessing import Manager
 import wx
-# import serial
 
 from daqthread import DAQThread
 
@@ -26,10 +23,7 @@ class MyFrame(wx.Frame):
 
         self.fig = Figure((5, 4), 75)
         self.canvas = FigureCanvasWxAgg(self.panel, -1, self.fig)
-        # self.scroll_range = 400
-        # self.canvas.SetScrollbar(wx.HORIZONTAL, 0, 5,
-        #                          self.scroll_range)
-        # self.canvas.SetPosition((400,1))
+
         self.start_stop_button = wx.Button(self.panel, -1, "Start");
         self.Bind(wx.EVT_BUTTON, self.start_stop_action, self.start_stop_button)
 
@@ -83,11 +77,6 @@ class MyFrame(wx.Frame):
         menuBar.Append(filemenu,"&File") # Adding the "filemenu" to the MenuBar
         self.SetMenuBar(menuBar)  # Adding the MenuBar to the Frame content.
 
-        # Try at 1 Hz, 2 Hz, and 10 Hz to see if the threading.Timer performs better than the wx.Timer
-        # self.redrawTimer = RepeatingTimer(0.5, self.onRedrawTimer)
-
-        # self.redrawTimer = wx.Timer(self)
-        # self.Bind(wx.EVT_TIMER, self.onRedrawTimer, self.redrawTimer)
         self.Bind(EVT_REDRAW, self.onRedraw)
         self.Bind(EVT_RESTART, self.onRestart)
 
@@ -101,7 +90,6 @@ class MyFrame(wx.Frame):
         self.init_data()
         self.init_plot()
 
-        # self.canvas.Bind(wx.EVT_SCROLLWIN, self.OnScrollEvt)
 
     def init_data(self):
         self.t_min = 0
@@ -178,8 +166,6 @@ class MyFrame(wx.Frame):
         if self.t_max + self.t_undrawn < self.t_window:
             self.t_start = 0
             self.t_end = self.t_window
-            # Pop a sample from the front of the array?
-            # If so, store the values in a master list that doesn't lose data
         else:
             self.t_end = self.t_max + self.t_undrawn
             self.t_start = self.t_end - self.t_window
@@ -204,7 +190,6 @@ class MyFrame(wx.Frame):
         self.canvas.restore_region(self.backgrounds[0])
         self.plot_data1.set_xdata([x - self.t_max for x in self.daqThread.t[first_drawable:last_drawable]])
         self.plot_data1.set_ydata(self.daqThread.ecg[first_drawable:last_drawable])
-        # self.plot_point1.set_xdata(self.daqThread.t[last_drawable])
         self.plot_point1.set_ydata(self.daqThread.ecg[last_drawable])
         self.plot_data_beats.set_xdata(beats_list);
         self.plot_data_beats.set_ydata([x * 200 for x in beats_list_y]);
@@ -219,7 +204,6 @@ class MyFrame(wx.Frame):
         self.canvas.restore_region(self.backgrounds[1])
         self.plot_data2.set_xdata([x - self.t_max for x in self.daqThread.t[first_drawable:last_drawable]])
         self.plot_data2.set_ydata(self.daqThread.bpm2[first_drawable:last_drawable])
-        # self.plot_point2.set_xdata(self.daqThread.t[last_drawable])
         self.plot_point2.set_ydata(self.daqThread.bpm2[last_drawable])
         self.plot_data_marks2.set_xdata(marks_list);
         self.plot_data_marks2.set_ydata([x * 80 for x in marks_list_y]);
@@ -231,7 +215,6 @@ class MyFrame(wx.Frame):
         self.canvas.restore_region(self.backgrounds[2])
         self.plot_data3.set_xdata([x - self.t_max for x in self.daqThread.t[first_drawable:last_drawable]])
         self.plot_data3.set_ydata(self.daqThread.edr[first_drawable:last_drawable])
-        # self.plot_point3.set_xdata(self.daqThread.t[last_drawable])
         self.plot_point3.set_ydata(self.daqThread.edr[last_drawable])
         self.plot_data_marks3.set_xdata(marks_list);
         self.plot_data_marks3.set_ydata([x * 700 for x in marks_list_y]);
@@ -240,34 +223,6 @@ class MyFrame(wx.Frame):
         self.axes3.draw_artist(self.plot_point3)
         self.canvas.blit(self.axes3.bbox)
 
-
-
-        # while self.beats_drawn < len(self.daqThread.beats):
-        #     beat_time = self.daqThread.beats[self.beats_drawn]
-        #     self.axes1.plot([beat_time, beat_time], [-512,512], 'g')
-        #     # self.axes2.plot([beat_time, beat_time], [100,800], 'g')
-        #     self.beats_drawn += 1
-        #     self.axes1.text(beat_time, -400, '%d' % self.beats_drawn)
-        #     # self.axes2.text(beat_time, 125, '%d' % self.beats_drawn)
-
-        while self.marks_drawn < len(self.daqThread.marks):
-            mark_time = self.daqThread.marks[self.marks_drawn]
-            self.axes1.plot([mark_time, mark_time], [-512,512], 'r')
-            self.axes2.plot([mark_time, mark_time], [50,100], 'r')
-            self.axes3.plot([mark_time, mark_time], [100,800], 'r')
-            self.marks_drawn += 1
-            self.axes1.text(mark_time, -400, '%d' % self.marks_drawn)
-            self.axes2.text(mark_time, 55, '%d' % self.marks_drawn)
-            self.axes3.text(mark_time, 125, '%d' % self.marks_drawn)
-
-        # Redraw:
-        # self.canvas.draw()
-
-    # def OnScrollEvt(self, event):
-    #     # Update the indices of the plot:
-    #     self.t_start = self.t_min + event.GetPosition()/self.scroll_range * self.t_max
-    #     self.i_end = self.t_min + self.t_window + event.GetPosition()/self.scroll_range * self.t_max
-    #     self.draw_plot()
 
     def OnAbout(self, event):
         """"""
@@ -296,26 +251,6 @@ class MyFrame(wx.Frame):
             redrawThread.start()
             self.start_stop_button.SetLabel("Stop")
 
-        # if self.redrawTimer.IsRunning():
-        #     self.redrawTimer.Stop()
-        #     self.daqThread.stop()
-        #     while self.daqThread.is_alive():
-        #         sleep(0.1)
-        #     self.daqThread = None
-        #     # consider plotting all the data and saving it for posterity!
-        #     self.start_stop_button.SetLabel("Start")
-        # else:
-        #     self.reset_plot()
-
-        #     self.daqThread = DAQThread()
-        #     self.daqThread.start()
-        #     # confirmed to work at 1 Hz on Rpi v2.
-        #     self.redrawTimer.Start(1000)
-        #     # self.daqThread.startime'] = datetime.utcnow()
-
-        #     self.start_stop_button.SetLabel("Stop")
-
-
     def OnExit(self, event):
         exit()
 
@@ -333,9 +268,7 @@ class RedrawThread(Thread):
     def run(self):
         redraw_evt = wx.PyCommandEvent(myEVT_REDRAW, -1)
         wx.PostEvent(self._parent, redraw_evt)
-        # Wait a little bit??
         sleep(0.3)
-        # Throw event that will cause this thread to restart!
         restart_evt = wx.PyCommandEvent(myEVT_RESTART, -1)
         wx.PostEvent(self._parent, restart_evt)
 
@@ -351,10 +284,5 @@ class MyApp(wx.App):
         return True
 
 if __name__ == '__main__':
-    # manager = Manager()
-
-    # plot_data = manager.dict()
-    # plot_data = {'t': list(), 'ecg': list(), 'edr': list(), 'start_time': None, 'beats': list(), 'bpm': None}  # consider using a Manager object for this
-
     app = MyApp()
     app.MainLoop()

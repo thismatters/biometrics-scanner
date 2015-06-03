@@ -1,13 +1,16 @@
 
 /*  Pulse Sensor Amped 1.4    by Joel Murphy and Yury Gitman   http://www.pulsesensor.com
+Pan-Tompkins QRS Detection Algorithm implemented by Paul Stiverson http://thismatters.net
 ----------------------  Notes ----------------------  ----------------------
 This code:
-1) Blinks an LED to User's Live Heartbeat   PIN 13
+1) Blinks an LED to User's Live Heartbeat   PIN 12
 2) Fades an LED to User's Live HeartBeat
 3) Determines BPM
 4) Prints All of the Above to Serial
 Read Me:
 https://github.com/WorldFamousElectronics/PulseSensor_Amped_Arduino/blob/master/README.md
+and
+https://github.com/thismatters/biometrics-scanner/blob/master/README.md
  ----------------------       ----------------------  ----------------------
 */
 
@@ -87,8 +90,8 @@ void interruptSetup(){
 
 // THIS IS THE TIMER 1 INTERRUPT SERVICE ROUTINE.
 // Timer 1 makes sure that we take a reading every 5 miliseconds
-ISR(TIMER1_COMPA_vect){                         // triggered when Timer1 counts to 124
-    cli();                                      // disable interrupts while we do this
+ISR(TIMER1_COMPA_vect){                         
+    cli();       // disable interrupts while we do this
     int_is_rising_i = false;
     peak_found_i = false;
     beat_happened_i = false;
@@ -96,13 +99,8 @@ ISR(TIMER1_COMPA_vect){                         // triggered when Timer1 counts 
     peak_found_f = false;
     beat_happened_f = false;
 
-    // for (int i=12; i>0; i--){
-    //     sample[i] = sample[i-1];
-    // }
-    // sample[0] = (long) analogRead(pulsePin) - 512;
-    roll_array_l(sample, 13, (long) analogRead(pulsePin) - 512);              // read the Pulse Sensor
+    roll_array_l(sample, 13, (long) analogRead(pulsePin) - 512);   // read the Pulse Sensor
     sample_count++;
-    // sendDataToSerial('S', sample_count);     // goes to sendDataToSerial function
 
     roll_array_l(low_pass, 33, (long) 2*low_pass[0]-low_pass[1]+sample[0]-2*sample[6]+sample[12]);
     roll_array_l(high_pass, 5, (long) high_pass[0]+low_pass[16]-low_pass[17]+(low_pass[32]-low_pass[0])/32);
@@ -256,7 +254,6 @@ ISR(TIMER1_COMPA_vect){                         // triggered when Timer1 counts 
     // roll over sample_count (to 2000) if it gets too big, make sure to correct last_R_sample and notify listener ??
     if (sample_count > 4294967285) {
         last_R_sample = 2000 - (sample_count - last_R_sample);
-        // sample_count_reset_notify()
         reset_diff = sample_count - 2000;
         sample_count = 2000;
         did_reset = true;
@@ -307,15 +304,12 @@ void beat_happened(long at_sample, int _peak_type){
     if (at_sample > last_R_sample + 40) {
         beat_count++;
         peak_type = _peak_type;
-        // sendDataToSerial('C', beat_count);
         if (beat_count > 1){
-            // sendDataToSerial('X', (at_sample - last_R_sample) * 5);
             update_RR_averages((at_sample - last_R_sample) * 5);
         }
         if (beat_count > 100) {
             beat_count = 10;
         }
-        // beat_happened_notify(at_sample); // reconsider this function
         last_R_sample = at_sample;
         prior_max_slope = max_slope;
         max_slope = 0;
@@ -393,20 +387,18 @@ void serialOutput(){   // Decide How To Output Serial.
         did_reset = false;
         reset_diff = 0;
     }
-    sendDataToSerial('S', sample_count);     // goes to sendDataToSerial function
-    sendDataToSerial('K', sample[0]);     // goes to sendDataToSerial function
-    sendDataToSerial('P', average_RR2);   // send heart rate with a 'P' prefix
+    sendDataToSerial('S', sample_count);
+    sendDataToSerial('K', sample[0]);
+    sendDataToSerial('P', average_RR2);
     sendDataToSerial('O', average_RR1);
+
     int raw = analogRead(edr_pin);
-    // float edr = (220 * raw) / (1024.0 - raw);
-    // sendDataToSerial('G', (int) edr);     // goes to sendDataToSerial function
-    sendDataToSerial('G',  raw);     // goes to sendDataToSerial function
+    sendDataToSerial('G',  raw);
     if (average_RR2 == average_RR1 && beat_count > 7) {
         sendDataToSerial('N', 1);
     } else {
         sendDataToSerial('N', 0);
     }
-    //sendDataToSerial('L', loop_count);     // goes to sendDataToSerial function
     sendDataToSerial('F', high_pass[0]);
     sendDataToSerial('D', diff);
     sendDataToSerial('Q', squared[0]);

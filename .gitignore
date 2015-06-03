@@ -3,3 +3,4 @@ Arduino/lib/*
 Thumbs.db
 temp/*
 *.pyc
+*.sublime*

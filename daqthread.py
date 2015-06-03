@@ -8,7 +8,6 @@ import serial
 class DAQThread(Thread):
     def __init__(self):
         super(DAQThread, self).__init__()
-        # self.plotData = plotData
         self.hp = list()  # results of the hi-pass filter
         self.sqr = list() # results of the squaring
         self.integrated = list() # results of the integration
