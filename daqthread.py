@@ -16,10 +16,12 @@ class DAQThread(Thread):
         self.t = list()
         self.ecg = list()
         self.edr = list()
-        self.beats = list()
-        self.beat_type = list()
         self.bpm1 = list()
         self.bpm2 = list()
+        self.name_to_list = {'time': self.t, 'ecg': self.ecg, 'edr': self.edr, 
+                             'bpm1': self.bpm1, 'bpm2': self.bpm2}
+        self.beats = list()
+        self.beat_type = list()
         self.marks = list()
         self.first_drawable = 0
         self.t_drawable = 12
@@ -28,7 +30,9 @@ class DAQThread(Thread):
         self.samples = None
         self.pulse_found = False
         self.pulse_regular = False
-        self.ser = serial.Serial(port='/dev/ttyAMA0', baudrate=115200, timeout=1)
+        self.ser = serial.Serial(port='/dev/ttyAMA0', 
+                                 baudrate=115200, 
+                                 timeout=1)
         self.ser.close()
         self.debug = False
 
@@ -51,44 +55,28 @@ class DAQThread(Thread):
         return prefix, value
 
     def run(self):
-        while self.keep_running and self.ser.isOpen():
+        appendix = {'S': self.t, 'K': self.ecg, 'G': self.edr, 
+                    'F': self.hp, 'Q': self.sqr, 'I': self.integrated, 
+                    'B': self.beats, 'P': self.bpm2, 'O': self.bpm1, 
+                    'T': self.thresh_i_list, 'Y': self.thresh_f_list,
+                    'W': self.beat_type}
+        
+        appendage = lambda x: 
+            {'S': x, 'K': x, 'G': x * 220 / (1024 - x), 'F': x, 'Q': x, 
+             'I': x, 'B': self.t[-1] + (x - self.samples) * 0.005, 
+             'P': 60000.0 / x, 'O': 60000.0 / x, 'T': x, 'Y': x, 'W': x}
+        
+        while self.keep_running:
             prefix, value = gather_sample()
 
             if prefix is None or value is None:
                 continue
-            # try making this a dictionary rather than a switch
             if prefix is 'S':
                 if self.samples is None:
-                    self.t.append(0)
-                    self.samples = value
+                    value = 0
                     self.start_time = datetime.utcnow()
                 else:
-                    samples_since_last = value - self.samples
-                    self.samples = value
-                    self.t.append(self.t[-1] + samples_since_last * 0.005)
-            if self.samples is None:
-                continue
-            if prefix is 'K':
-                self.ecg.append(value)
-            if prefix is 'G':
-                self.edr.append(value * 220 / (1024 - value))
-            if prefix is 'F':
-                self.hp.append(value)
-            if prefix is 'Q':
-                self.sqr.append(value)
-            if prefix is 'I':
-                self.integrated.append(value)
-            if prefix is 'B':
-                self.beats.append(self.t[-1] + (value - self.samples) * 0.005)
-            if prefix is 'P':
-                self.bpm2.append(60000.0 / value)
-            if prefix is 'O':
-                self.bpm1.append(60000.0 / value)
-            if prefix is 'T':
-                self.thresh_i_list.append(value)
-            if prefix is 'Y':
-                self.thresh_f_list.append(value)
-                if self.samples is not None:
+                    value = self.t[-1] + (value - self.samples) * 0.005
                     if self.last_drawable is None:
                         self.last_drawable = 0
                         self.first_drawable = 0
@@ -96,18 +84,19 @@ class DAQThread(Thread):
                         self.last_drawable += 1
                     if self.t[self.first_drawable] < self.t[self.last_drawable] - self.t_drawable:
                         self.first_drawable += 1
-
-            if prefix is 'N':
-                if value:
-                    self.pulse_regular = True
-                else:
-                    self.pulse_regular = False
-            if prefix is 'R':  # reset counter
-                print "Arduino reset happened!"
-                self.samples -= value
-            if prefix is 'W':
-                if self.beats:
-                    self.beat_type.append(value)
+            
+            if self.samples is not None or prefix is 'S':
+                try:
+                    appendix[prefix].append(appendage(value)[prefix])
+                except KeyError as e:
+                    if prefix is 'N': 
+                        if value:
+                            self.pulse_regular = True
+                        else:
+                            self.pulse_regular = False
+                    if prefix is 'R':  # reset counter
+                        print "Arduino reset happened!"
+                        self.samples -= value
 
 
     def stop(self):
@@ -156,11 +145,33 @@ class DAQThread(Thread):
         plt.savefig('trial_run_at_%s.png' % self.start_time)
         # plt.savefig('trial_run.png')
 
-        print "Average sample time: %f" % (float(self.t[-1]) / len(self.t),
-        )
+        print "Average sample time: %f" % (float(self.t[-1]) / len(self.t),)
 
     def add_mark(self):
         self.marks.append(timedelta.total_seconds(datetime.utcnow() - self.start_time))
 
+    def get_drawable(self, data_set_name=None):
+        ret_val = None
+        try:
+            ret_val = self.name_to_list[data_set_name][self.first_drawable:self.last_drawable]
+        except KeyError as e:
+            print "(get_drawable) No data set by name: %s" % str(data_set_name)
+            ret_val = [0,0]
+        except IndexError as e:
+            print "(get_drawable) Bad range."
+            ret_val = [0,0]
+        return ret_val
+
+    def get_last(self, data_set_name=None):
+        ret_val = None
+        try:
+            ret_val = self.name_to_list[data_set_name][last_drawable]
+        except KeyError as e:
+            print "(get_drawable) No data set by name: %s" % str(data_set_name)
+            ret_val = 0
+        except IndexError as e:
+            print "(get_drawable) Bad range."
+            ret_val = 0
+        return ret_val
 
 
