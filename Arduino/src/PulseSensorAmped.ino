@@ -115,9 +115,8 @@ ISR(TIMER1_COMPA_vect){
     for (int i=29; i>=0; i--){
         sum += squared[i];
     }
-    unsigned long quotient = (unsigned long) (sum / 30);
     integrated[1] = integrated[0];
-    integrated[0] = quotient;
+    integrated[0] = (unsigned long) (sum / 30);
 
     // look for peaks in 'high_pass'
     if ((long) high_pass[0] >= (long) high_pass[1]) {
@@ -132,18 +131,17 @@ ISR(TIMER1_COMPA_vect){
 
     if (peak_found_f == true) {
         if (peak_val_f >= thresh1_f) {
-            spk_f = (peak_val_f + 7*spk_f)/8;
+            update_spk_f(peak_val_f);
             beat_happened_f = true;
         } else {
-            npk_f = (peak_val_f + 7*npk_f)/8;
+            update_npk_f(peak_val_f);
             if (peak_val_f > candidate_peak_val_f[1]) {
                 candidate_peak_val_f[0] = integrated[1];
                 candidate_peak_val_f[1] = peak_val_f;
                 candidate_peak_index_f = sample_count;
             }
         }
-        thresh1_f = npk_f + (spk_f - npk_f) / 2;
-        thresh2_f = npk_f;
+        update_thresh_f();
     }
 
     // look for peaks in 'integrated'
@@ -161,18 +159,17 @@ ISR(TIMER1_COMPA_vect){
     if (peak_found_i == true) {
         // There is a minimum 200ms refractory period between beats (200 / 5 = 40 thus wait 40 samples before accepting a new peak)
         if (peak_val_i >= thresh1_i){
-            spk_i = (peak_val_i + 7*spk_i)/8;
+            update_spk_i(peak_val_i);
             beat_happened_i = true;
         } else {
-            npk_i = (peak_val_i + 7*npk_i)/8;
+            update_npk_i(peak_val_i);
             if (peak_val_i > candidate_peak_val_i[0]) {
                 candidate_peak_val_i[0] = peak_val_i;
                 candidate_peak_val_i[1] = high_pass[1];
                 candidate_peak_index_i = sample_count;
             }
         }
-        thresh1_i = npk_i + (spk_i - npk_i) / 4;
-        thresh2_i = thresh1_i / 2;
+        update_thresh_i();
     }
 
     if (sample_count > last_R_sample + 40) {
@@ -182,12 +179,7 @@ ISR(TIMER1_COMPA_vect){
         }
         if ((beat_happened_f == true && integrated[0] > thresh1_i) || (beat_happened_i == true && high_pass[0] > thresh1_f)) {
             beat_happened(sample_count,0);
-            candidate_peak_index_i = 0;
-            candidate_peak_val_i[0] = thresh2_i;
-            candidate_peak_val_i[1] = 0;
-            candidate_peak_index_f = 0;
-            candidate_peak_val_f[0] = 0;
-            candidate_peak_val_f[1] = thresh2_f;
+            clear_candidate_peaks();
         }
     }
 
@@ -197,53 +189,29 @@ ISR(TIMER1_COMPA_vect){
             int candidate_peak_offset = candidate_peak_index_i - candidate_peak_index_f;
             if (candidate_peak_offset * candidate_peak_offset < 100) {
                 beat_happened((candidate_peak_index_i + candidate_peak_index_f) / 2,1);
-                spk_i = (candidate_peak_val_i[0] + 3*spk_i)/4;
-                thresh1_i = npk_i + (spk_i - npk_i) / 4;
-                thresh2_i = thresh1_i / 2;
-                candidate_peak_index_i = 0;
-                candidate_peak_val_i[0] = thresh2_i;
-                candidate_peak_val_i[1] = 0;
-
-                spk_f = (candidate_peak_val_f[1] + 3*spk_f)/4;
-                thresh1_f = npk_f + (spk_f - npk_f) / 2;
-                thresh2_f = npk_f;
-                candidate_peak_index_f = 0;
-                candidate_peak_val_f[0] = 0;
-                candidate_peak_val_f[1] = thresh2_f;
+                update_spk_i_lookback(candidate_peak_val_i[0]);
+                update_thresh_i();
+                update_spk_f_lookback(candidate_peak_val_f[1]);
+                update_thresh_f();
+                clear_candidate_peaks();
             }
 
         } else {
             if (candidate_peak_index_i != 0 && candidate_peak_val_i[1] > thresh2_f) {
                 beat_happened(candidate_peak_index_i,2);
-                spk_i = (candidate_peak_val_i[0] + 3*spk_i)/4;
-                thresh1_i = npk_i + (spk_i - npk_i) / 4;
-                thresh2_i = thresh1_i / 2;
-                candidate_peak_index_i = 0;
-                candidate_peak_val_i[0] = thresh2_i;
-                candidate_peak_val_i[1] = 0;
-
-                spk_f = (candidate_peak_val_i[1] + 3*spk_f)/4;
-                thresh1_f = npk_f + (spk_f - npk_f) / 2;
-                thresh2_f = npk_f;
-                candidate_peak_index_f = 0;
-                candidate_peak_val_f[0] = 0;
-                candidate_peak_val_f[1] = thresh2_f;
+                update_spk_i_lookback(candidate_peak_val_i[0]);
+                update_thresh_i();
+                update_spk_f_lookback(candidate_peak_val_i[1]);
+                update_thresh_f();
+                clear_candidate_peaks();
             }
             if (candidate_peak_index_f != 0 && candidate_peak_val_f[0] > thresh2_i) {
                 beat_happened(candidate_peak_index_f,3);
-                spk_i = (candidate_peak_val_f[0] + 3*spk_i)/4;
-                thresh1_i = npk_i + (spk_i - npk_i) / 4;
-                thresh2_i = thresh1_i / 2;
-                candidate_peak_index_i = 0;
-                candidate_peak_val_i[0] = thresh2_i;
-                candidate_peak_val_i[1] = 0;
-
-                spk_f = (candidate_peak_val_f[1] + 3*spk_f)/4;
-                thresh1_f = npk_f + (spk_f - npk_f) / 2;
-                thresh2_f = npk_f;
-                candidate_peak_index_f = 0;
-                candidate_peak_val_f[0] = 0;
-                candidate_peak_val_f[1] = thresh2_f;
+                update_spk_i_lookback(candidate_peak_val_f[0]);
+                update_thresh_i();
+                update_spk_f_lookback(candidate_peak_val_f[1]);
+                update_thresh_f();
+                clear_candidate_peaks();
             }
         }
     }
@@ -300,7 +268,47 @@ ISR(TIMER1_COMPA_vect){
 }// end isr
 
 
+void update_spk_f(long peak_val) {
+    spk_f = (peak_val + 7*spk_f)/8;
+}
+void update_npk_f(long peak_val) {
+    npk_f = (peak_val + 7*npk_f)/8;
+}
+void update_spk_i(unsigned long peak_val) {
+    spk_i = (peak_val + 7*spk_i)/8;
+} 
+void update_npk_i(unsigned long peak_val) {
+    npk_i = (peak_val + 7*npk_i)/8;
+}
+
+void update_spk_f_lookback(long peak_val) {
+    spk_f = (peak_val + 3*spk_f)/4;
+}
+void update_spk_i_lookback(unsigned long peak_val) {
+    spk_i = (peak_val + 3*spk_i)/4;
+}
+
+void update_thresh_f() {
+    thresh1_f = npk_f + (spk_f - npk_f) / 2;
+    thresh2_f = npk_f
+}
+
+void update_thresh_i() {
+    thresh1_i = npk_i + (spk_i - npk_i) / 4;
+    thresh2_i = thresh1_i / 2;
+}
+
+void clear_candidate_peaks(){
+    candidate_peak_index_f = 0;
+    candidate_peak_val_f[0] = 0;
+    candidate_peak_val_f[1] = thresh2_f;
+    candidate_peak_index_i = 0;
+    candidate_peak_val_i[0] = thresh2_i;
+    candidate_peak_val_i[1] = 0;
+}
+
 void beat_happened(long at_sample, int _peak_type){
+    
     if (at_sample > last_R_sample + 40) {
         beat_count++;
         peak_type = _peak_type;
