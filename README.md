@@ -1,2 +1,10 @@
 # biometrics-scanner
 Gertboard + Raspberry Pi + pulsesensor
+
+Hello, this project is intended to permit the use of a pulse sensor on the Raspberry Pi. I achieve this by way of the ATMega 328 (Arduino) chip that is included with the Gertboard. The pulse sensor I'm designing around is the one available at (http://pulsesensor.com); I have found it to be exceptional. The jumping-off point for the Ardiuno code was found at (https://github.com/WorldFamousElectronics/PulseSensor_Amped_Arduino). Their infrastructure for setting up the timers was a useful guide. However, the ATMega 328 on the Gertboard is clocked at 12MHz, so a slight modification was needed. Instead of using their algorithm for determining when a heartbeat has occurred I decided to implement the Pan-Tompkins QRS Detection Algorithm (http://www.engr.wisc.edu/bme/faculty/tompkins_willis/Pan.pdf). I've taken some liberties with the RR Averages, but overall my implementation is true to the paper (note the errata at the end correcting some of the processing stages).
+
+I'm using a Raspberry Pi 2 and Python (with matplotlib) to visualize the data either with a wxPython GUI or directly to a PNG file without the need for X11.
+
+Interfacing the Arduino on the Gertboard and the Raspberry Pi was easy when following Gordon's superb guide (https://projects.drogon.net/raspberry-pi/gertboard/). Follow it completely. Inotool (http://inotool.org/) has also made the development of this project much easier; their tutorial is quite useful (http://inotool.org/quickstart) but it is lacking some useful information specific to the Gertboard. Namely, you will need set the correct serial port for communication with the ATMega, for me it was /dev/ttyAMA0. If you read the "Configuration Files" section of the Inotool guide you will know what to do with that. It goes without saying that the board model is "gert328". Attempting to upload your build to the ATMega without erasing it first has caused Inotool to fail, you can erase you ATMega with avrdude directly with `avrdude -p atmega328p -c gpio -e`.
+
+
