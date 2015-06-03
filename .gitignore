@@ -1,0 +1,5 @@
+Arduino/lib/*
+!Arduino/lib/
+Thumbs.db
+temp/*
+*.pyc
