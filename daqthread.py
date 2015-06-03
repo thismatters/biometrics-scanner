@@ -11,10 +11,8 @@ class DAQThread(Thread):
         self.hp = list()  # results of the hi-pass filter
         self.sqr = list() # results of the squaring
         self.integrated = list() # results of the integration
-        self.thresh1_i_list = list()
-        self.thresh2_i_list = list()
-        self.thresh1_f_list = list()
-        self.thresh2_f_list = list()
+        self.thresh_i_list = list()
+        self.thresh_f_list = list()
         self.t = list()
         self.ecg = list()
         self.edr = list()
@@ -34,37 +32,14 @@ class DAQThread(Thread):
         self.ser.close()
         self.debug = False
 
-    def run(self):
-        del self.hp[:]
-        del self.sqr[:]
-        del self.integrated[:]
-        del self.thresh1_i_list[:]
-        del self.thresh2_i_list[:]
-        del self.thresh1_f_list[:]
-        del self.thresh2_f_list[:]
-        del self.t[:]
-        del self.ecg[:]
-        del self.edr[:]
-        del self.beats[:]
-        del self.beat_type[:]
-        del self.bpm2[:]
-        del self.marks[:]
-
-        self.first_drawable = 0
-        self.last_drawable = None
-        self.start_time = None
-        self.samples = None
-        self.pulse_regular = False
-        self.pulse_found = False
-        self.ser.open()
-        self.keep_running = True
-        while self.keep_running and self.ser.isOpen():
+    def gather_sample(self):
+        prefix = None
+        value = None
+        if self.ser.isOpen():
             try:
                 line = self.ser.readline()
             except:
                 print 'bad readline()'
-            prefix = None
-            value = None
             if self.debug:
                 print "Prefix: %s, value: %d" % (prefix, value)
             if line:
@@ -73,9 +48,15 @@ class DAQThread(Thread):
                     value = long(line[1:])
                 except ValueError as e:
                     print "line: %s" % (line, )
+        return prefix, value
 
-            if not self.keep_running or value is None:
+    def run(self):
+        while self.keep_running and self.ser.isOpen():
+            prefix, value = gather_sample()
+
+            if prefix is None or value is None:
                 continue
+            # try making this a dictionary rather than a switch
             if prefix is 'S':
                 if self.samples is None:
                     self.t.append(0)
@@ -98,20 +79,15 @@ class DAQThread(Thread):
             if prefix is 'I':
                 self.integrated.append(value)
             if prefix is 'B':
-                samples_since_last = value - self.samples
-                self.beats.append(self.t[-1] + samples_since_last * 0.005)
+                self.beats.append(self.t[-1] + (value - self.samples) * 0.005)
             if prefix is 'P':
                 self.bpm2.append(60000.0 / value)
-                self.pulse_found = True
             if prefix is 'O':
                 self.bpm1.append(60000.0 / value)
-                self.pulse_found = True
             if prefix is 'T':
-                self.thresh1_i_list.append(value)
-                self.thresh2_i_list.append(value * 0.5)
+                self.thresh_i_list.append(value)
             if prefix is 'Y':
-                self.thresh1_f_list.append(value)
-                self.thresh2_f_list.append(value * 0.5)
+                self.thresh_f_list.append(value)
                 if self.samples is not None:
                     if self.last_drawable is None:
                         self.last_drawable = 0
@@ -127,10 +103,11 @@ class DAQThread(Thread):
                 else:
                     self.pulse_regular = False
             if prefix is 'R':  # reset counter
-                print "reset happened!"
+                print "Arduino reset happened!"
                 self.samples -= value
             if prefix is 'W':
-                self.beat_type.append(value)
+                if self.beats:
+                    self.beat_type.append(value)
 
 
     def stop(self):
@@ -138,63 +115,49 @@ class DAQThread(Thread):
         self.keep_running = False
         plt.clf()
 
-        n = min(len(self.t),
-                len(self.ecg),
-                len(self.edr),
-                len(self.bpm2),
-                len(self.bpm1),
-                len(self.hp),
-                len(self.thresh1_i_list),
-                len(self.thresh1_f_list),
-                len(self.sqr),
-                len(self.integrated))
+        fig, axes = plt.subplots(nrows=6)
+        y_data = [(self.edr, ), 
+                  (self.bpm1, self.bpm2),
+                  (self.ecg, ),
+                  (self.hp, self.thresh_f_list, [x * 0.5 for x in self.thresh_f_list]),
+                  (self.sqr, ),
+                  (self.integrated, self.thresh_i_list, [x * 0.5 for x in self.thresh_i_list])]
+        styles = [('b', ),
+                  ('b','r'),
+                  ('b', ),
+                  ('b', 'r', 'g'),
+                  ('b', ),
+                  ('b', 'r', 'g')] 
+        draw_marks = [True, True, False, False, False, False]
+        draw_beats = [False, False, True, False, False, False]
+        y_labels = ['EDR [kOhm]', 'Pulse [bpm]', 'ECG', 'Filtered', 'D and squared', 'Integrated']
 
-        plt.subplot(6,1,1)
-        plt.plot(self.t[:n],self.edr[:n])
-        for i in range(0, len(self.marks)):
-            time = self.marks[i]
-            plt.plot([time,time], [100,800], 'g')
-            plt.text(time, 125, '%d' % (i + 1, ))
-        plt.ylabel('EDR [kOhm]')
-
-        plt.subplot(6,1,2)
-        plt.plot(self.t[:n],self.bpm2[:n],'b')
-        plt.plot(self.t[:n],self.bpm1[:n],'r')
-        for i in range(0, len(self.marks)):
-            time = self.marks[i]
-            plt.plot([time,time], [50,85], 'g')
-            plt.text(time, 80, '%d' % (i + 1, ))
-        plt.ylabel('Pulse [bpm]')
-
-        plt.subplot(6,1,3)
-        plt.plot(self.t[:n],self.ecg[:n])
-        for (time, _type) in zip(self.beats, self.beat_type):
-            plt.plot([time,time], [-512,512], 'g')
-            plt.text(time, -400, '%d' % _type)
-        plt.ylabel('ECG')
-
-        plt.subplot(6,1,4)
-        plt.plot(self.t[:n],self.hp[:n])
-        plt.plot(self.t[:n],self.thresh1_f_list[:n])
-        plt.plot(self.t[:n],self.thresh2_f_list[:n])
-        plt.ylabel('Filtered')
-
-        plt.subplot(6,1,5)
-        plt.plot(self.t[:n],self.sqr[:n])
-        plt.ylabel('D and squared')
-
-        plt.subplot(6,1,6)
-        plt.plot(self.t[:n],self.integrated[:n])
-        plt.plot(self.t[:n],self.thresh1_i_list[:n])
-        plt.plot(self.t[:n],self.thresh2_i_list[:n])
-        plt.ylabel('integrated')
+        for ax, data_tup, style_tup, draw_mark, draw_beat, y_label in zip(
+                axes, y_data, styles, draw_marks, draw_beats, y_labels):
+            y_min = 100000
+            y_max = 0
+            for data, style in zip (data_tup, style_tup):
+                ax.plot(self.t[:last_drawable], data[:last_drawable], style)
+                y_max = max(y_max, max(data[:last_drawable]))
+                y_min = min(y_min, min(data[:last_drawable]))
+            if draw_mark:
+                for i in range(0, len(self.marks)):
+                    time = self.marks[i]
+                    ax.plot([time,time], [y_min,y_max], 'g')
+                    ax.text(time, y_min + (y_max - y_min) * 0.75, '%d' % (i + 1, ))
+            if draw_beat:
+                for (time, _type) in zip(self.beats, self.beat_type):
+                    ax.plot([time,time], [y_min,y_max], 'g')
+                    ax.text(time, y_min + (y_max - y_min) * 0.25, '%d' % _type)
+            ax.set_ylabel(ylabel)
 
         default_size = plt.gcf().get_size_inches()
         plt.gcf().set_size_inches((0.5 * self.t[-1], 8))
         plt.savefig('trial_run_at_%s.png' % self.start_time)
         # plt.savefig('trial_run.png')
 
-        print "Average sample time: %f" % (float(self.t[-1]) / len(self.t), )
+        print "Average sample time: %f" % (float(self.t[-1]) / len(self.t),
+        )
 
     def add_mark(self):
         self.marks.append(timedelta.total_seconds(datetime.utcnow() - self.start_time))
