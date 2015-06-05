@@ -15,8 +15,8 @@ https://github.com/thismatters/biometrics-scanner/blob/master/README.md
 */
 
 //  Variables
-int pulsePin = 0;                 // Pulse Sensor purple wire connected to analog pin 0
-int edr_pin = 1;                 // Pulse Sensor purple wire connected to analog pin 0
+int ecg_pin = 0;                 // Pulse Sensor purple wire connected to analog pin 0
+int edr_pin = 5;                 // Pulse Sensor purple wire connected to analog pin 0
 int blinkPin = 12;                // pin to blink led at each beat
 
 // Volatile Variables, used in the interrupt service routine!
@@ -33,10 +33,13 @@ volatile unsigned long reset_diff = 0;
 volatile boolean did_reset = false;
 
 // Various buffers for Pan Tompkins
-volatile long sample[13];
+volatile long ecg_sample[13];
+volatile long edr_sample[13];
+volatile long edr_low_pass[33];
 volatile long low_pass[33];
 volatile long high_pass[5];
 volatile long diff = 0;
+volatile long last_diff = 0;
 volatile unsigned long squared[30];
 volatile unsigned long integrated[2];
 volatile int rr_intervals1[8];
@@ -48,7 +51,7 @@ volatile long prior_max_slope = 0;
 
 // Thresholds for Pan Tompkins
 volatile boolean was_rising_i = true;
-volatile boolean int_is_rising_i;
+volatile boolean is_rising_i;
 volatile boolean peak_found_i;
 volatile boolean beat_happened_i;
 volatile unsigned long peak_val_i;
@@ -60,7 +63,7 @@ volatile unsigned long candidate_peak_index_i = 0;
 volatile unsigned long candidate_peak_val_i[2] = {15000, 688};
 
 volatile boolean was_rising_f = true;
-volatile boolean int_is_rising_f;
+volatile boolean is_rising_f;
 volatile boolean peak_found_f;
 volatile boolean beat_happened_f;
 volatile long peak_val_f;
@@ -90,20 +93,24 @@ void interruptSetup(){
 
 // THIS IS THE TIMER 1 INTERRUPT SERVICE ROUTINE.
 // Timer 1 makes sure that we take a reading every 5 miliseconds
-ISR(TIMER1_COMPA_vect){                         
+ISR(TIMER1_COMPA_vect){
     cli();       // disable interrupts while we do this
-    int_is_rising_i = false;
+    is_rising_i = false;
     peak_found_i = false;
     beat_happened_i = false;
-    int_is_rising_f = false;
+    is_rising_f = false;
     peak_found_f = false;
     beat_happened_f = false;
 
-    roll_array_l(sample, 13, (long) analogRead(pulsePin) - 512);   // read the Pulse Sensor
+    roll_array_l(ecg_sample, 13, (long) analogRead(ecg_pin) - 512);   // read the Pulse Sensor
+    roll_array_l(edr_sample, 13, (long) analogRead(edr_pin) - 1);   // read the Pulse Sensor
     sample_count++;
 
-    roll_array_l(low_pass, 33, (long) 2*low_pass[0]-low_pass[1]+sample[0]-2*sample[6]+sample[12]);
+    roll_array_l(edr_low_pass, 33, (long) 2*edr_low_pass[0]-edr_low_pass[1]+edr_sample[0]-2*edr_sample[6]+edr_sample[12]);
+
+    roll_array_l(low_pass, 33, (long) 2*low_pass[0]-low_pass[1]+ecg_sample[0]-2*ecg_sample[6]+ecg_sample[12]);
     roll_array_l(high_pass, 5, (long) high_pass[0]+low_pass[16]-low_pass[17]+(low_pass[32]-low_pass[0])/32);
+    last_diff = diff;
     diff = 2 * high_pass[0] + high_pass[1] - high_pass[3] - 2 * high_pass[4];
     roll_array_ul(squared, 30, (unsigned long) (diff*diff)/64);
 
@@ -118,11 +125,8 @@ ISR(TIMER1_COMPA_vect){
     integrated[1] = integrated[0];
     integrated[0] = (unsigned long) (sum / 30);
 
-    // look for peaks in 'high_pass'
-    if ((long) high_pass[0] >= (long) high_pass[1]) {
-        int_is_rising_f = true;
-    }
-    if ((was_rising_f == true && int_is_rising_f == false) &&  (((long) high_pass[1] > 0 && (long) high_pass[0] > 0) && (long) high_pass[2] > 0) ) {
+    if (last_diff > 0 && diff < 0) {
+        // Find peaks using the derivative!
         if (sample_count > 60) {
             peak_found_f = true;
             peak_val_f = high_pass[1];
@@ -144,11 +148,12 @@ ISR(TIMER1_COMPA_vect){
         update_thresh_f();
     }
 
+    was_rising_i = is_rising_i;
     // look for peaks in 'integrated'
     if (integrated[0] >= integrated[1]) {
-        int_is_rising_i = true;
+        is_rising_i = true;
     }
-    if (was_rising_i == true && int_is_rising_i == false) {
+    if (was_rising_i == true && is_rising_i == false) {
         if (sample_count > 60) {
             peak_found_i = true;
             peak_val_i = integrated[1];
@@ -157,7 +162,6 @@ ISR(TIMER1_COMPA_vect){
 
     // identify peak and update thresholds
     if (peak_found_i == true) {
-        // There is a minimum 200ms refractory period between beats (200 / 5 = 40 thus wait 40 samples before accepting a new peak)
         if (peak_val_i >= thresh1_i){
             update_spk_i(peak_val_i);
             beat_happened_i = true;
@@ -173,13 +177,14 @@ ISR(TIMER1_COMPA_vect){
     }
 
     if (sample_count > last_R_sample + 40) {
+        // There is a minimum 200ms refractory period between beats (200 / 5 = 40 thus wait 40 samples before accepting a new peak)
         if (sample_count < last_R_sample + 72 && max_slope < prior_max_slope / 2) {
+            // This peak looks more like a T-wave than a QRS Complex
             beat_happened_i = false;
             beat_happened_f = false;
         }
         if ((beat_happened_f == true && integrated[0] > thresh1_i) || (beat_happened_i == true && high_pass[0] > thresh1_f)) {
             beat_happened(sample_count,0);
-            clear_candidate_peaks();
         }
     }
 
@@ -188,36 +193,18 @@ ISR(TIMER1_COMPA_vect){
         if (candidate_peak_index_f != 0 && candidate_peak_index_i != 0) {
             int candidate_peak_offset = candidate_peak_index_i - candidate_peak_index_f;
             if (candidate_peak_offset * candidate_peak_offset < 100) {
-                beat_happened((candidate_peak_index_i + candidate_peak_index_f) / 2,1);
-                update_spk_i_lookback(candidate_peak_val_i[0]);
-                update_thresh_i();
-                update_spk_f_lookback(candidate_peak_val_f[1]);
-                update_thresh_f();
-                clear_candidate_peaks();
+                beat_found_on_lookback((candidate_peak_index_i + candidate_peak_index_f) / 2,1, candidate_peak_val_i[0], candidate_peak_val_f[1]);
             }
 
         } else {
             if (candidate_peak_index_i != 0 && candidate_peak_val_i[1] > thresh2_f) {
-                beat_happened(candidate_peak_index_i,2);
-                update_spk_i_lookback(candidate_peak_val_i[0]);
-                update_thresh_i();
-                update_spk_f_lookback(candidate_peak_val_i[1]);
-                update_thresh_f();
-                clear_candidate_peaks();
+                beat_found_on_lookback(candidate_peak_index_i,2, candidate_peak_val_i[0], candidate_peak_val_i[1]);
             }
             if (candidate_peak_index_f != 0 && candidate_peak_val_f[0] > thresh2_i) {
-                beat_happened(candidate_peak_index_f,3);
-                update_spk_i_lookback(candidate_peak_val_f[0]);
-                update_thresh_i();
-                update_spk_f_lookback(candidate_peak_val_f[1]);
-                update_thresh_f();
-                clear_candidate_peaks();
+                beat_found_on_lookback(candidate_peak_index_f,3, candidate_peak_val_f[0], candidate_peak_val_f[1]);
             }
         }
     }
-
-    was_rising_i = int_is_rising_i;
-    was_rising_f = int_is_rising_f;
 
     // roll over sample_count (to 2000) if it gets too big, make sure to correct last_R_sample and notify listener ??
     if (sample_count > 4294967285) {
@@ -230,43 +217,53 @@ ISR(TIMER1_COMPA_vect){
     // time out and reset if no beat detected in too long, notify listener
     if (sample_count > last_R_sample + 1000) {
         reset_diff = sample_count;
-        sample_count = 0;
-        last_R_sample = 0;
-        beat_count = 0;
-        average_RR2 = 1000;
-        average_RR1 = 950;
-        for (int i=0; i<8; i++){
-            rr_intervals1[i] = 0;
-            rr_intervals2[i] = 0;
-        }
-        for (int i=0; i<13; i++) {
-            sample[i] = 0;
-        }
-        for (int i=0; i<33; i++) {
-            low_pass[i] = 0;
-        }
-        for (int i=0; i<5; i++) {
-            high_pass[i] = 0;
-        }
-        for (int i=0; i<30; i++) {
-            squared[i] = 0;
-        }
-        integrated[0] = 0;
-        integrated[1] = 0;
-        thresh1_i = 9000;
-        thresh2_i = 4500;
-        spk_i = 9000;
-        npk_i = 1500;
-        thresh1_f = 1375;
-        thresh2_f = 688;
-        spk_f = 2500;
-        npk_f = 1000;
+        timeout_reset();
         did_reset = true;
-        prior_max_slope = 0;
     }
     sei();                                   // enable interrupts when youre done!
 }// end isr
 
+void timeout_reset(){
+    sample_count = 0;
+    last_R_sample = 0;
+    beat_count = 0;
+    average_RR2 = 1000;
+    average_RR1 = 950;
+    for (int i=0; i<8; i++){
+        rr_intervals1[i] = 0;
+        rr_intervals2[i] = 0;
+    }
+    for (int i=0; i<13; i++) {
+        ecg_sample[i] = 0;
+    }
+    for (int i=0; i<13; i++) {
+        edr_sample[i] = 0;
+    }
+    for (int i=0; i<33; i++) {
+        edr_low_pass[i] = 0;
+    }
+    for (int i=0; i<33; i++) {
+        low_pass[i] = 0;
+    }
+    for (int i=0; i<5; i++) {
+        high_pass[i] = 0;
+    }
+    for (int i=0; i<30; i++) {
+        squared[i] = 0;
+    }
+    integrated[0] = 0;
+    integrated[1] = 0;
+    thresh1_i = 9000;
+    thresh2_i = 4500;
+    spk_i = 9000;
+    npk_i = 1500;
+    thresh1_f = 1375;
+    thresh2_f = 688;
+    spk_f = 2500;
+    npk_f = 1000;
+    last_diff = 0;
+    prior_max_slope = 0;
+}
 
 void update_spk_f(long peak_val) {
     spk_f = (peak_val + 7*spk_f)/8;
@@ -276,21 +273,14 @@ void update_npk_f(long peak_val) {
 }
 void update_spk_i(unsigned long peak_val) {
     spk_i = (peak_val + 7*spk_i)/8;
-} 
+}
 void update_npk_i(unsigned long peak_val) {
     npk_i = (peak_val + 7*npk_i)/8;
 }
 
-void update_spk_f_lookback(long peak_val) {
-    spk_f = (peak_val + 3*spk_f)/4;
-}
-void update_spk_i_lookback(unsigned long peak_val) {
-    spk_i = (peak_val + 3*spk_i)/4;
-}
-
 void update_thresh_f() {
     thresh1_f = npk_f + (spk_f - npk_f) / 2;
-    thresh2_f = npk_f
+    thresh2_f = npk_f;
 }
 
 void update_thresh_i() {
@@ -308,7 +298,6 @@ void clear_candidate_peaks(){
 }
 
 void beat_happened(long at_sample, int _peak_type){
-    
     if (at_sample > last_R_sample + 40) {
         beat_count++;
         peak_type = _peak_type;
@@ -322,11 +311,22 @@ void beat_happened(long at_sample, int _peak_type){
         prior_max_slope = max_slope;
         max_slope = 0;
         QS = true;
+        clear_candidate_peaks();
     }
 }
 
+
+void beat_found_on_lookback(long at_sample, int _peak_type, long peak_val_i, long peak_val_f) {
+    beat_happened(at_sample, _peak_type);
+    spk_i = (peak_val_i + 3*spk_i)/4;
+    update_thresh_i();
+    spk_f = (peak_val_f + 3*spk_f)/4;
+    update_thresh_f();
+}
+
 void update_RR_averages(int current_RR_interval){
-    // sendDataToSerial('X', current_RR_interval);
+    // I took some liberties on this code, the Pan Tompkins paper is a little vague about the 
+    //   implementation of the RR Averages.
     long sum = 0;
     int count = 0;
     for (int i=7; i > 0; i--) {
@@ -363,6 +363,7 @@ void update_RR_averages(int current_RR_interval){
         } else {
             intervals_skipped++;
             if (intervals_skipped > 3) {
+                // This is not in the original Pan Tompkins.
                 average_RR2 = (average_RR2 + 3 * average_RR1) / 4;
                 for (int i=0; i<8; i++) {
                     rr_intervals2[0] = 0;
@@ -396,12 +397,10 @@ void serialOutput(){   // Decide How To Output Serial.
         reset_diff = 0;
     }
     sendDataToSerial('S', sample_count);
-    sendDataToSerial('K', sample[0]);
+    sendDataToSerial('K', ecg_sample[0]);
     sendDataToSerial('P', average_RR2);
     sendDataToSerial('O', average_RR1);
-
-    int raw = analogRead(edr_pin);
-    sendDataToSerial('G',  raw);
+    sendDataToSerial('G', (long) edr_low_pass[0] / 36);
     if (average_RR2 == average_RR1 && beat_count > 7) {
         sendDataToSerial('N', 1);
     } else {
@@ -413,6 +412,7 @@ void serialOutput(){   // Decide How To Output Serial.
     sendDataToSerial('I', integrated[0]);
     sendDataToSerial('T', thresh1_i);
     sendDataToSerial('Y', thresh1_f);
+    sendDataToSerial('H', thresh2_f);
 
 }
 
