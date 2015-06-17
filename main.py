@@ -73,7 +73,7 @@ class MyFrame(wx.Frame):
 
         filemenu.AppendSeparator()
         exit_button = filemenu.Append(wx.ID_EXIT,"E&xit"," Terminate the program")
-        self.Bind(wx.EVT_MENU, self.onExit, exit_button)
+        self.Bind(wx.EVT_MENU, self.OnExit, exit_button)
         # Creating the menubar.
         menuBar = wx.MenuBar()
         menuBar.Append(filemenu,"&File") # Adding the "filemenu" to the MenuBar
@@ -81,7 +81,6 @@ class MyFrame(wx.Frame):
 
         self.Bind(EVT_REDRAW, self.onRedraw)
         self.Bind(EVT_RESTART, self.onRestart)
-        self.Bind(wx.EVT_CLOSE, self.onExit)
 
         self.mark_times = list()
 
@@ -96,7 +95,8 @@ class MyFrame(wx.Frame):
         self.t_window = 15
         self.t_undrawn = 2
         self.data_sets = ['ecg', 'bpm2', 'edr']
-        self.data_limits = [(-512, 512), (50, 120), (100, 800)]
+        self.data_limits = [(-512, 512), (50, 150), (80, 300)]
+        # self.data_limits = [(-10, 10), (50, 55), (150, 200)]
         self.lines = list()
         self.data_labels = ['ECG', 'Pulse Rate (BPM)', 'EDR (kOhms)']
         self.show_beats = [True, False, False]
@@ -119,7 +119,7 @@ class MyFrame(wx.Frame):
             mark_line = None
             if show_beat:
                 beat_line = ax.plot(0,-600, 'ro')[0]
-            if mark_line:
+            if show_mark:
                 mark_line = ax.plot(0,-600, 'ko')[0]
             ax.set_xlim(self.t_undrawn - self.t_window, self.t_undrawn)
             ax.set_ylim(*data_limit)
@@ -127,9 +127,15 @@ class MyFrame(wx.Frame):
 
         self.canvas.draw()
         self.backgrounds = [self.canvas.copy_from_bbox(ax.bbox) for ax in self.axes]
-
-
+    
+    def reset_data_limits(self, ax, background, limits):
+	ax.set_ylim(*limits)
+        self.canvas.draw()
+        background = self.canvas.copy_from_bbox(ax.bbox)
+            
     def onRedraw(self, event):
+        # last_drawable = self.daqThread.last_drawable
+        # first_drawable = self.daqThread.first_drawable
         self.daqThread.redraw_lock()
         self.currentBPM.SetLabel('%0.3f' % self.daqThread.get_last('bpm2'))
         if self.daqThread.pulse_regular:
@@ -150,7 +156,7 @@ class MyFrame(wx.Frame):
                 *[(x - t_max, 1) for x in self.daqThread.beats if x > t_cutoff])
         except ValueError:
             ''''''
-            print "beats_list not populated"
+            # print "beats_list unpopulated"
         marks_list_x = None
         marks_list_y = None
         try:
@@ -158,14 +164,18 @@ class MyFrame(wx.Frame):
                 *[(x - t_max, 1) for x in self.daqThread.marks if x > t_cutoff])
         except ValueError:
             ''''''
-        for ax, background, data_set, data_label, data_limit, line_tuple in zip(
-                self.axes, self.backgrounds, self.data_sets, self.data_labels, self.data_limits, self.lines):
+        for ax, background, data_set_name, data_label, line_tuple, data_limit in zip(
+                self.axes, self.backgrounds, self.data_sets, self.data_labels, self.lines, self.data_limits):
             self.canvas.restore_region(background)
             data_set_line, data_point_line, beat_line, mark_line = line_tuple
             data_set_line.set_xdata(drawable_time)
-            data_set_line.set_ydata(self.daqThread.get_drawable(data_set))
+            data_set_line.set_ydata(self.daqThread.get_drawable(data_set_name))
+            # new_data_limit = self.daqThread.get_y_limits(data_set_name)
+            # if new_data_limit[0] < data_limit[0] or new_data_limit[1] > data_limit[1]:
+            #     self.reset_data_limits(ax, background, new_data_limit)
+            
             ax.draw_artist(data_set_line)
-            data_point_line.set_ydata(self.daqThread.get_last(data_set))
+            data_point_line.set_ydata(self.daqThread.get_last(data_set_name))
             ax.draw_artist(data_point_line)
             if beat_line is not None and beats_list_x is not None:
                 beat_line.set_xdata(beats_list_x);
@@ -206,8 +216,7 @@ class MyFrame(wx.Frame):
             redrawThread.start()
             self.start_stop_button.SetLabel("Stop")
 
-    def onExit(self, event):
-        self.Close()
+    def OnExit(self, event):
         exit()
 
     def mark_time_action(self, event):
@@ -224,7 +233,7 @@ class RedrawThread(Thread):
     def run(self):
         redraw_evt = wx.PyCommandEvent(myEVT_REDRAW, -1)
         wx.PostEvent(self._parent, redraw_evt)
-        sleep(0.3)
+        sleep(0.35)
         restart_evt = wx.PyCommandEvent(myEVT_RESTART, -1)
         wx.PostEvent(self._parent, restart_evt)
 
